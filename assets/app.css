@@ -91,6 +91,8 @@
   display: flex;
   flex-direction: column;
   pointer-events: auto;
+  /* Dragging a note must win over the browser's own touch scrolling. */
+  touch-action: none;
   background-color: var(--color-bg-1);
   border-radius: 8px;
   box-shadow: 0 0 0 2px var(--node-accent);
@@ -178,6 +180,8 @@
 }
 
 .node-editor {
+  /* The editor needs native touch behaviour back for caret and selection. */
+  touch-action: auto;
   width: 100%;
   height: 100%;
   resize: none;
@@ -192,17 +196,29 @@
   line-height: var(--line-height);
 }
 
+/* Bottom-right grip. The element is a generous touch target; the visible
+   corner is drawn inset from it. Both scale inversely with zoom so the grip
+   stays the same size on screen. */
 .node-resize {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: calc(16px * 1 / var(--scale));
-  height: calc(16px * 1 / var(--scale));
+  width: calc(24px * 1 / var(--scale));
+  height: calc(24px * 1 / var(--scale));
   cursor: nwse-resize;
   opacity: 0;
-  border-right: 2px solid var(--color-ui-3);
-  border-bottom: 2px solid var(--color-ui-3);
-  border-bottom-right-radius: 8px;
+  touch-action: none;
+}
+.node-resize::after {
+  content: '';
+  position: absolute;
+  right: calc(3px * 1 / var(--scale));
+  bottom: calc(3px * 1 / var(--scale));
+  width: calc(12px * 1 / var(--scale));
+  height: calc(12px * 1 / var(--scale));
+  border-right: calc(2px * 1 / var(--scale)) solid var(--color-ui-3);
+  border-bottom: calc(2px * 1 / var(--scale)) solid var(--color-ui-3);
+  border-bottom-right-radius: calc(7px * 1 / var(--scale));
 }
 .node:hover .node-resize,
 .node.is-selected .node-resize {

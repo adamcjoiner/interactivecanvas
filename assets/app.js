@@ -17,6 +17,8 @@
   var ZOOM_STEP = 0.15;
   var MIN_NODE_W = 120;
   var MIN_NODE_H = 60;
+  var LONG_PRESS_MS = 350;
+  var TAP_SLOP = 5; // screen px of travel still counted as a tap
   var DEFAULT_NODE = { width: 260, height: 120 };
 
   // Spec preset colors "1".."6". Values are deliberately app-defined; these are
@@ -48,16 +50,17 @@
         id: 'a1b2c3d4e5f60002',
         type: 'text',
         x: 100,
-        y: -180,
-        width: 280,
-        height: 210,
+        y: -200,
+        width: 290,
+        height: 285,
         color: '6',
         text:
           '## Handling\n\n' +
-          '- Drag the header to move\n' +
-          '- Drag the corner to resize\n' +
-          '- `Delete` removes a selection\n' +
-          '- Scroll to pan, `Ctrl`+scroll to zoom'
+          '- Tap a note to select, tap again to edit\n' +
+          '- Drag a selected note from anywhere\n' +
+          '- Hold an unselected note to pick it up\n' +
+          '- Drag the corner grip to resize\n' +
+          '- Pinch to zoom, `Delete` to remove'
       },
       {
         id: 'a1b2c3d4e5f60003',
@@ -392,6 +395,7 @@
 
   // --------------------------------------------------------------- editing --
   function startEditing(id) {
+    if (editingId === id) return; // already open; don't reset the caret
     var node = nodeById(id);
     if (!node || node.type !== 'text') return;
 
@@ -448,115 +452,298 @@
   }
 
   // ---------------------------------------------------------- interactions --
-  var drag = null;
+  //
+  //   empty canvas   drag              pan
+  //                  double-click      new note
+  //   node header    drag              move
+  //   node body      tap               select; tap again to edit
+  //                  drag (selected)   move
+  //                  hold 350ms        pick up, then keep dragging to move
+  //                  drag (unselected) pan the canvas
+  //   corner grip    drag              resize
+  //   two pointers   pinch             zoom about the midpoint
+  //
+  var pointers = new Map(); // live pointerId -> client position
+  var gesture = null;
+  var longPressTimer = null;
+
+  function cancelLongPress() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
+
+  function clearGestureVisuals() {
+    els.viewport.classList.remove('is-panning');
+    if (gesture && gesture.node) {
+      var el = nodeEls[gesture.node.id];
+      if (el) el.classList.remove('is-dragging');
+    }
+  }
+
+  function distance(a, b) {
+    return Math.hypot(b.x - a.x, b.y - a.y);
+  }
+
+  function viewportPoint(clientX, clientY) {
+    var rect = els.viewport.getBoundingClientRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }
+
+  function beginMove(node, clientX, clientY) {
+    bringToFront(node);
+    gesture = {
+      mode: 'move',
+      node: node,
+      startX: clientX,
+      startY: clientY,
+      originX: node.x,
+      originY: node.y,
+      moved: false
+    };
+    render();
+    var el = nodeEls[node.id];
+    if (el) el.classList.add('is-dragging');
+  }
+
+  function beginPan(clientX, clientY) {
+    gesture = {
+      mode: 'pan',
+      startX: clientX,
+      startY: clientY,
+      originX: view.panX,
+      originY: view.panY,
+      moved: false
+    };
+    els.viewport.classList.add('is-panning');
+  }
+
+  function beginPinch() {
+    var pts = Array.from(pointers.values());
+    var mid = viewportPoint((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
+    gesture = {
+      mode: 'pinch',
+      startDistance: Math.max(distance(pts[0], pts[1]), 1),
+      startScale: view.scale,
+      // Canvas-space point sitting under the midpoint when the pinch began.
+      anchorX: (mid.x - view.panX) / view.scale,
+      anchorY: (mid.y - view.panY) / view.scale
+    };
+  }
+
+  function updatePinch() {
+    var pts = Array.from(pointers.values());
+    if (pts.length < 2) return;
+
+    var mid = viewportPoint((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
+    var ratio = distance(pts[0], pts[1]) / gesture.startDistance;
+
+    view.scale = clamp(gesture.startScale * ratio, MIN_SCALE, MAX_SCALE);
+    // Holding the anchor under the moving midpoint folds two-finger panning
+    // into the same gesture.
+    view.panX = mid.x - gesture.anchorX * view.scale;
+    view.panY = mid.y - gesture.anchorY * view.scale;
+    applyTransform();
+  }
 
   function onPointerDown(event) {
-    if (event.button !== 0) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    // The editor owns its own pointer handling (caret placement, selection).
+    if (event.target.closest('.node-editor')) return;
 
-    var nodeEl = event.target.closest('.node');
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    els.viewport.setPointerCapture(event.pointerId);
 
-    if (event.target.closest('.node-delete')) {
+    if (pointers.size === 2) {
+      cancelLongPress();
+      if (gesture && gesture.moved && (gesture.mode === 'move' || gesture.mode === 'resize')) {
+        commit();
+      }
+      clearGestureVisuals();
+      beginPinch();
+      return;
+    }
+    if (pointers.size > 2) return;
+
+    var target = event.target;
+    var nodeEl = target.closest('.node');
+
+    if (target.closest('.node-delete')) {
       event.preventDefault();
       deleteNode(nodeEl.dataset.id);
       return;
     }
 
+    // Commit an open editor before starting anything elsewhere.
+    if (editingId && (!nodeEl || nodeEl.dataset.id !== editingId)) {
+      var editor = els.nodes.querySelector('.node-editor');
+      if (editor) editor.blur();
+    }
+
     if (!nodeEl) {
-      // Empty canvas: deselect, and drag to pan.
-      if (editingId) return; // let the textarea blur commit first
+      event.preventDefault();
       select(null);
-      drag = {
-        mode: 'pan',
-        startX: event.clientX,
-        startY: event.clientY,
-        originX: view.panX,
-        originY: view.panY
-      };
-      els.viewport.setPointerCapture(event.pointerId);
-      els.viewport.classList.add('is-panning');
+      beginPan(event.clientX, event.clientY);
       return;
     }
 
     var node = nodeById(nodeEl.dataset.id);
     if (!node) return;
 
-    select(node.id);
+    event.preventDefault();
 
-    if (event.target.closest('.node-resize')) {
-      event.preventDefault();
-      drag = {
+    if (target.closest('.node-resize')) {
+      select(node.id);
+      gesture = {
         mode: 'resize',
         node: node,
         startX: event.clientX,
         startY: event.clientY,
         originW: node.width,
-        originH: node.height
+        originH: node.height,
+        moved: false
       };
-      els.viewport.setPointerCapture(event.pointerId);
       return;
     }
 
-    if (event.target.closest('.node-handle')) {
-      event.preventDefault();
-      bringToFront(node);
-      drag = {
-        mode: 'move',
-        node: node,
-        startX: event.clientX,
-        startY: event.clientY,
-        originX: node.x,
-        originY: node.y
-      };
-      els.viewport.setPointerCapture(event.pointerId);
-      nodeEls[node.id].classList.add('is-dragging');
-      render();
+    var wasSelected = node.id === selectedId;
+
+    // The header sits outside the card and is purely a grab affordance, so it
+    // never opens the editor — that keeps keyboard actions like Delete usable
+    // straight after grabbing a note.
+    if (target.closest('.node-handle')) {
+      select(node.id);
+      beginMove(node, event.clientX, event.clientY);
+      gesture.tapEdits = false;
+      return;
     }
+
+    if (wasSelected) {
+      // Drag from anywhere on it, or tap again to edit.
+      beginMove(node, event.clientX, event.clientY);
+      gesture.tapEdits = true;
+      return;
+    }
+
+    // Not selected: hold to pick it up; moving sooner pans the canvas instead.
+    gesture = {
+      mode: 'pending',
+      node: node,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false
+    };
+    longPressTimer = setTimeout(function () {
+      longPressTimer = null;
+      if (!gesture || gesture.mode !== 'pending') return;
+      // Resume from where the pointer is now so the node doesn't jump.
+      var from = pointers.get(event.pointerId) || { x: gesture.startX, y: gesture.startY };
+      select(node.id);
+      beginMove(node, from.x, from.y);
+    }, LONG_PRESS_MS);
   }
 
   function onPointerMove(event) {
-    if (!drag) return;
+    if (!pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
-    var dx = event.clientX - drag.startX;
-    var dy = event.clientY - drag.startY;
+    if (!gesture) return;
 
-    if (drag.mode === 'pan') {
-      view.panX = drag.originX + dx;
-      view.panY = drag.originY + dy;
+    if (gesture.mode === 'pinch') {
+      updatePinch();
+      return;
+    }
+
+    var dx = event.clientX - gesture.startX;
+    var dy = event.clientY - gesture.startY;
+    if (!gesture.moved && Math.hypot(dx, dy) > TAP_SLOP) gesture.moved = true;
+
+    if (gesture.mode === 'pending') {
+      if (!gesture.moved) return;
+      // Moved before the hold completed, so this is a canvas pan.
+      cancelLongPress();
+      var fromX = gesture.startX;
+      var fromY = gesture.startY;
+      beginPan(fromX, fromY);
+      gesture.moved = true;
+      dx = event.clientX - fromX;
+      dy = event.clientY - fromY;
+    }
+
+    if (gesture.mode === 'pan') {
+      view.panX = gesture.originX + dx;
+      view.panY = gesture.originY + dy;
       applyTransform();
       return;
     }
 
-    if (drag.mode === 'move') {
-      drag.node.x = Math.round(drag.originX + dx / view.scale);
-      drag.node.y = Math.round(drag.originY + dy / view.scale);
-      var el = nodeEls[drag.node.id];
-      el.style.left = drag.node.x + 'px';
-      el.style.top = drag.node.y + 'px';
+    if (gesture.mode === 'move') {
+      if (!gesture.moved) return;
+      gesture.node.x = Math.round(gesture.originX + dx / view.scale);
+      gesture.node.y = Math.round(gesture.originY + dy / view.scale);
+      var el = nodeEls[gesture.node.id];
+      if (el) {
+        el.style.left = gesture.node.x + 'px';
+        el.style.top = gesture.node.y + 'px';
+      }
       renderEdges();
       return;
     }
 
-    if (drag.mode === 'resize') {
-      drag.node.width = Math.round(Math.max(MIN_NODE_W, drag.originW + dx / view.scale));
-      drag.node.height = Math.round(Math.max(MIN_NODE_H, drag.originH + dy / view.scale));
-      var resizing = nodeEls[drag.node.id];
-      resizing.style.width = drag.node.width + 'px';
-      resizing.style.height = drag.node.height + 'px';
+    if (gesture.mode === 'resize') {
+      gesture.node.width = Math.round(Math.max(MIN_NODE_W, gesture.originW + dx / view.scale));
+      gesture.node.height = Math.round(Math.max(MIN_NODE_H, gesture.originH + dy / view.scale));
+      var resizing = nodeEls[gesture.node.id];
+      if (resizing) {
+        resizing.style.width = gesture.node.width + 'px';
+        resizing.style.height = gesture.node.height + 'px';
+      }
       renderEdges();
     }
   }
 
-  function onPointerUp() {
-    if (!drag) return;
-
-    if (drag.mode === 'pan') {
-      els.viewport.classList.remove('is-panning');
-    } else {
-      var el = nodeEls[drag.node.id];
-      if (el) el.classList.remove('is-dragging');
-      commit();
+  function onPointerUp(event) {
+    pointers.delete(event.pointerId);
+    if (els.viewport.hasPointerCapture(event.pointerId)) {
+      els.viewport.releasePointerCapture(event.pointerId);
     }
-    drag = null;
+
+    if (!gesture) return;
+
+    if (gesture.mode === 'pinch') {
+      if (pointers.size >= 2) return;
+      gesture = null;
+      // One finger still down: carry on as a pan rather than stranding it.
+      if (pointers.size === 1) {
+        var remaining = Array.from(pointers.values())[0];
+        beginPan(remaining.x, remaining.y);
+      }
+      return;
+    }
+
+    cancelLongPress();
+
+    if (gesture.mode === 'pending') {
+      if (!gesture.moved) select(gesture.node.id);
+      gesture = null;
+      return;
+    }
+
+    clearGestureVisuals();
+
+    if (gesture.mode === 'move' || gesture.mode === 'resize') {
+      if (gesture.moved) {
+        commit();
+      } else if (gesture.mode === 'move' && gesture.tapEdits && gesture.node.type === 'text') {
+        var id = gesture.node.id;
+        gesture = null;
+        startEditing(id);
+        return;
+      }
+    }
+
+    gesture = null;
   }
 
   function onDoubleClick(event) {
@@ -695,6 +882,13 @@
     els.viewport.addEventListener('pointercancel', onPointerUp);
     els.viewport.addEventListener('dblclick', onDoubleClick);
     els.viewport.addEventListener('wheel', onWheel, { passive: false });
+
+    // Safari pinches the page itself unless these are cancelled.
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (name) {
+      els.viewport.addEventListener(name, function (event) {
+        event.preventDefault();
+      });
+    });
     document.addEventListener('keydown', onKeyDown);
 
     document.getElementById('app-add-node').addEventListener('click', function () {
