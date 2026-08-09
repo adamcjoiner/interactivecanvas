@@ -11,6 +11,9 @@
     <link rel="icon"                 href="{{ site.url }}/assets/icon.svg"    type="image/svg+xml">
     <link rel="apple-touch-icon"     href="{{ site.url }}/assets/apple-touch-icon.png">
     <link rel="stylesheet"           href="{{ site.url }}/assets/style.css"  type="text/css">
+    {%- if page.stylesheet %}
+    <link rel="stylesheet"           href="{{ site.url }}/assets/{{ page.stylesheet }}" type="text/css">
+    {%- endif %}
 
     <meta property="og:site_name"    content="{{ site.title }}">
     <meta property="og:url"          content="{{ site.url }}{{ page.url }}">

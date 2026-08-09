@@ -1,0 +1,318 @@
+/* JSON Canvas app chrome. Builds on the tokens defined in style.css. */
+
+#app {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+/* Top bar */
+#app-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-ui-1);
+  background-color: var(--color-bg-1);
+  z-index: 300;
+}
+#app-bar .app-logo {
+  line-height: 0;
+  flex-shrink: 0;
+}
+#app-bar .app-title {
+  font-size: var(--font-small);
+  font-weight: 600;
+  color: var(--color-tx-2);
+  flex-grow: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#app-bar .app-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Canvas surface */
+#app-viewport {
+  --scale: 1;
+  --pan-x: 0px;
+  --pan-y: 0px;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  background-color: var(--color-bg-2);
+  background-image: radial-gradient(var(--color-ui-1) calc(var(--scale) * 0.5px + 0.5px), transparent 0);
+  background-size: calc(var(--scale) * 20px) calc(var(--scale) * 20px);
+  background-position: calc(var(--pan-x) - 19px) calc(var(--pan-y) - 19px);
+  cursor: default;
+}
+#app-viewport.is-panning {
+  cursor: grabbing;
+}
+
+#app-edges,
+#app-nodes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: translate(var(--pan-x), var(--pan-y)) scale(var(--scale));
+  transform-origin: left top;
+}
+#app-edges {
+  overflow: visible;
+  pointer-events: none;
+  user-select: none;
+  z-index: 150;
+}
+#app-edges path {
+  stroke: var(--color-ui-3);
+  stroke-width: 2;
+  fill: none;
+}
+#app-edges marker {
+  fill: var(--color-ui-3);
+}
+#app-nodes {
+  z-index: 200;
+  pointer-events: none;
+}
+
+/* Nodes */
+.node {
+  --node-accent: var(--color-ui-1);
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  background-color: var(--color-bg-1);
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--node-accent);
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+.node.is-selected {
+  box-shadow: 0 0 0 2px var(--color-ui-3);
+}
+.node.is-dragging {
+  box-shadow: 0 0 0 2px var(--color-ui-3), 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+.node-handle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: absolute;
+  top: calc(-2.25em * 1 / var(--scale));
+  left: 0;
+  width: 100%;
+  height: calc(2.25em * 1 / var(--scale));
+  padding: 0 calc(0.5em * 1 / var(--scale));
+  cursor: grab;
+  font-size: calc(var(--font-smaller) * 1 / var(--scale));
+  color: var(--color-ui-2);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.node.is-dragging .node-handle {
+  cursor: grabbing;
+}
+.node:hover .node-handle,
+.node.is-selected .node-handle {
+  color: var(--color-tx-1);
+}
+.node-title {
+  flex-grow: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.node-delete {
+  opacity: 0;
+  padding: 0 0.4em;
+  line-height: 1.2;
+  font-size: 1.1em;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.node:hover .node-delete,
+.node.is-selected .node-delete {
+  opacity: 1;
+}
+.node-delete:hover {
+  color: var(--color-bg-1);
+  background-color: var(--color-ax-1);
+}
+.node-delete:focus-visible {
+  outline: 2px solid var(--color-ui-3);
+  outline-offset: 1px;
+}
+
+.node-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+.node-body > *:first-child {
+  margin-top: 0;
+}
+.node-body > *:last-child {
+  margin-bottom: 0;
+}
+.node-body h1 { font-size: 1.5em; }
+.node-body h2 { font-size: 1.25em; }
+.node-body h3 { font-size: 1.1em; }
+.node-placeholder {
+  color: var(--color-tx-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-small);
+}
+
+.node-editor {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--color-tx-1);
+  font-family: var(--font-mono);
+  font-size: var(--font-small);
+  line-height: var(--line-height);
+}
+
+.node-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: calc(16px * 1 / var(--scale));
+  height: calc(16px * 1 / var(--scale));
+  cursor: nwse-resize;
+  opacity: 0;
+  border-right: 2px solid var(--color-ui-3);
+  border-bottom: 2px solid var(--color-ui-3);
+  border-bottom-right-radius: 8px;
+}
+.node:hover .node-resize,
+.node.is-selected .node-resize {
+  opacity: 1;
+}
+
+/* Group nodes sit behind everything else and are just an outline. */
+.node-type-group {
+  background-color: transparent;
+  box-shadow: 0 0 0 2px var(--node-accent);
+}
+
+/* Output pane */
+#app-output {
+  position: fixed;
+  top: 4rem;
+  right: 1rem;
+  bottom: 4rem;
+  width: 24em;
+  max-width: 40%;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid var(--color-ui-1);
+  background-color: var(--color-bg-1);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+#app-output[hidden] {
+  display: none;
+}
+#app-output .code-header,
+#app-output .code-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1rem;
+  font-size: 80%;
+  font-weight: 500;
+  color: var(--color-tx-2);
+}
+#app-output .code-header .language {
+  flex-grow: 1;
+}
+#app-output .code-footer {
+  justify-content: center;
+}
+#app-output-scroll {
+  flex-grow: 1;
+  overflow: auto;
+  padding: 1rem;
+  border-top: 1px solid var(--color-ui-1);
+  border-bottom: 1px solid var(--color-ui-1);
+}
+#app-output pre {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+#app-close-output {
+  padding: 0 0.4em;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+#app-close-output:hover {
+  color: var(--color-tx-1);
+}
+
+/* Canvas controls */
+#app-controls {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 350;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (max-width: 800px) {
+  #app-bar .app-title {
+    display: none;
+  }
+  #app-output {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: 60vh;
+    border-radius: 12px 12px 0 0;
+  }
+  #app-controls {
+    bottom: 1rem;
+    left: 1rem;
+    right: 1rem;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

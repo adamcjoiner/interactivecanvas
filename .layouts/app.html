@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+{% include head.html %}
+  <body>
+
+    <div id="app">
+      <header id="app-bar">
+        <a href="/" class="app-logo" title="JSON Canvas home">
+          <img width="98" height="36" src="/logo.svg" alt="JSON Canvas" />
+        </a>
+        <span class="app-title">Untitled canvas</span>
+
+        <div class="app-actions">
+          <button type="button" id="app-add-node">Add note</button>
+          <button type="button" id="app-toggle-output" aria-expanded="false" aria-controls="app-output">JSON</button>
+          <button type="button" id="app-download">Download</button>
+          <button type="button" id="app-reset">Reset</button>
+        </div>
+      </header>
+
+      <div id="app-viewport">
+        <svg id="app-edges">
+          <defs>
+            <marker id="arrow-end" markerWidth="10" markerHeight="8" refX="5" refY="4" orient="auto">
+              <polygon points="0 0, 10 4, 0 8" />
+            </marker>
+            <marker id="arrow-start" markerWidth="10" markerHeight="8" refX="5" refY="4" orient="auto-start-reverse">
+              <polygon points="0 0, 10 4, 0 8" />
+            </marker>
+          </defs>
+          <g id="app-edge-paths"></g>
+        </svg>
+
+        <div id="app-nodes"></div>
+      </div>
+    </div>
+
+    <aside id="app-output" hidden>
+      <div class="code-header">
+        <span class="language">JSON&nbsp;Canvas</span>
+        <button type="button" id="app-close-output" aria-label="Close JSON panel">×</button>
+      </div>
+      <div id="app-output-scroll">
+        <pre><code class="language-json" id="app-output-code"></code></pre>
+      </div>
+      <div class="code-footer">
+        <span>Live document</span>
+      </div>
+    </aside>
+
+    <div id="app-controls">
+      <button type="button" id="app-zoom-out" aria-label="Zoom out">Zoom out</button>
+      <button type="button" id="app-zoom-in" aria-label="Zoom in">Zoom in</button>
+      <button type="button" id="app-zoom-fit">Fit</button>
+    </div>
+
+    <script src="/assets/markdown.js"></script>
+    <script src="/assets/prism.js"></script>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
